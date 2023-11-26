@@ -5,7 +5,6 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
-from pydub import AudioSegment
 from typing import Optional
 import speech_recognition as sr
 import tempfile
@@ -150,6 +149,14 @@ class RecaptchaSolver:
 
         self._driver.switch_to.parent_frame()
 
+    @staticmethod
+    def _convert_audio_file(in_file: str, out_file: str) -> None:
+        '''Convert the MP3 audio file to WAV.'''
+        # This allow this method to be override when is not used pydub. Doing this
+        # also allow other preprocessing for the audio file.
+        from pydub import AudioSegment
+        AudioSegment.from_mp3(in_file).export(out_file, format='wav')
+
     def _solve_audio_challenge(self, language: str) -> None:
         try:
             # Locate audio challenge download link
@@ -164,34 +171,26 @@ class RecaptchaSolver:
 
         # Create temporary directory and temporary files
         tmp_dir = tempfile.gettempdir()
-
         id_ = uuid.uuid4().hex
-
         mp3_file, wav_file = os.path.join(tmp_dir, f'{id_}_tmp.mp3'), os.path.join(tmp_dir, f'{id_}_tmp.wav')
-
         tmp_files = {mp3_file, wav_file}
 
         with open(mp3_file, 'wb') as f:
             link = download_link.get_attribute('href')
-
             audio_download = requests.get(url=link, allow_redirects=True)
-
             f.write(audio_download.content)
-
             f.close()
 
         # Convert MP3 to WAV format for compatibility with speech recognizer APIs
-        AudioSegment.from_mp3(mp3_file).export(wav_file, format='wav')
+        self._convert_audio_file(mp3_file, wav_file)
 
         # Disable dynamic energy threshold to avoid failed reCAPTCHA audio transcription due to static noise
         self._recognizer.dynamic_energy_threshold = False
 
         with sr.AudioFile(wav_file) as source:
             audio = self._recognizer.listen(source)
-
             try:
                 recognized_text = self._service.recognize(self._recognizer, audio, language)
-
             except sr.UnknownValueError:
                 raise RecaptchaException('Speech recognition API could not understand audio, try again')
 
